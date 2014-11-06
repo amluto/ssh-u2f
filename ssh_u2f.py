@@ -123,11 +123,16 @@ class Parser(object):
         size = len(self.data) - len(parsed[1])
         return self.parse_bytes(size)
 
+    def parse_rest(self):
+        return self.parse_bytes(len(self.data))
+
     def parse_end(self):
         if len(self.data) != 0:
             raise ValueError('malformed data')
 
 class Key(object):
+    __slots__ = ['challenge', 'app', 'pubkey', 'handle', 'cert', 'sig']
+
     def attestation_sig_data(self):
         """Returns the data that the attestation cert should have signed."""
         return (struct.pack('>B32s32s', 0x00, self.app, self.challenge) +
@@ -151,6 +156,9 @@ class Key(object):
             return True
         except OpenSSL.crypto.Error:
             return False
+
+class Authentication(object):
+    __slots__ = ['presence', 'counter', 'sig']
 
 def u2freq(ins, p1, p2, msg):
     with u2f.list_devices()[0] as d:
@@ -183,6 +191,20 @@ def generate_key():
     key.sig = sig
 
     return key
+
+def authenticate(handle, app, challenge):
+    regmsg = struct.pack('>32s32sB', challenge, app, len(handle)) + handle
+
+    # P1 = 0x03 means "enforce user presence and sign"
+    result = u2freq(U2F_AUTHENTICATE, 0x03, 0, regmsg)
+
+    p = Parser(result)
+
+    ret = Authentication()
+    ret.presence, ret.counter = struct.unpack('>BI', p.parse_bytes(5))
+    ret.sig = p.parse_asn1der_rawdata()
+    p.parse_end()
+    return ret
 
 def main():
     print(generate_key())
